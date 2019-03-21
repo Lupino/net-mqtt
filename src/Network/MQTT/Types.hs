@@ -87,10 +87,10 @@ blLength :: BL.ByteString -> BL.ByteString
 blLength = BL.pack . encodeLength . fromEnum . BL.length
 
 withLength :: BL.ByteString -> BL.ByteString
-withLength a = blLength a <> a
+withLength a = blLength a `BL.append` a
 
 instance ByteMe BL.ByteString where
-  toByteString a = (encodeWord16 . toEnum . fromEnum . BL.length) a <> a
+  toByteString a = (encodeWord16 . toEnum . fromEnum . BL.length) a `BL.append` a
 
 data ProtocolLevel = Protocol311 deriving(Eq, Show)
 
@@ -119,16 +119,16 @@ connectRequest = ConnectRequest{_username=Nothing, _password=Nothing, _lastWill=
 
 instance ByteMe ConnectRequest where
   toByteString ConnectRequest{..} = BL.singleton 0x10
-                                    <> withLength val
+                                    `BL.append` withLength val
     where
       val :: BL.ByteString
       val =  "\NUL\EOTMQTT\EOT" -- MQTT + Protocol311
-             <> BL.singleton connBits
-             <> encodeWord16 _keepAlive
-             <> toByteString _connID
-             <> lwt _lastWill
-             <> perhaps _username
-             <> perhaps _password
+             `BL.append` BL.singleton connBits
+             `BL.append` encodeWord16 _keepAlive
+             `BL.append` toByteString _connID
+             `BL.append` lwt _lastWill
+             `BL.append` perhaps _username
+             `BL.append` perhaps _password
       connBits = hasu .|. hasp .|. willBits .|. clean
         where
           hasu = boolBit (isJust _username) ≪ 7
@@ -140,7 +140,7 @@ instance ByteMe ConnectRequest where
 
       lwt :: Maybe LastWill -> BL.ByteString
       lwt Nothing = mempty
-      lwt (Just LastWill{..}) = toByteString _willTopic <> toByteString _willMsg
+      lwt (Just LastWill{..}) = toByteString _willTopic `BL.append` toByteString _willMsg
 
       perhaps :: Maybe BL.ByteString -> BL.ByteString
       perhaps Nothing  = ""
@@ -273,7 +273,7 @@ data PublishRequest = PublishRequest{
 
 instance ByteMe PublishRequest where
   toByteString PublishRequest{..} = BL.singleton (0x30 .|. f)
-                                    <> withLength val
+                                    `BL.append` withLength val
     where f = (db ≪ 3) .|. (qb ≪ 1) .|. rb
           db = boolBit _pubDup
           qb = qosW _pubQoS .&. 0x3
@@ -281,7 +281,7 @@ instance ByteMe PublishRequest where
           pktid
             | _pubQoS == QoS0 = mempty
             | otherwise = encodeWord16 _pubPktID
-          val = toByteString _pubTopic <> pktid <> _pubBody
+          val = toByteString _pubTopic `BL.append` pktid `BL.append` _pubBody
 
 parsePublish :: A.Parser MQTTPkt
 parsePublish = do
@@ -304,13 +304,13 @@ data SubscribeRequest = SubscribeRequest Word16 [(BL.ByteString, QoS)]
 instance ByteMe SubscribeRequest where
   toByteString (SubscribeRequest pid sreq) =
     BL.singleton 0x82
-    <> withLength (encodeWord16 pid <> reqs)
-    where reqs = (BL.concat . map (\(bs,q) -> toByteString bs <> BL.singleton (qosW q))) sreq
+    `BL.append` withLength (encodeWord16 pid `BL.append` reqs)
+    where reqs = (BL.concat . map (\(bs,q) -> toByteString bs `BL.append` BL.singleton (qosW q))) sreq
 
 newtype PubACK = PubACK Word16 deriving(Eq, Show)
 
 instance ByteMe PubACK where
-  toByteString (PubACK pid) = BL.singleton 0x40 <> withLength (encodeWord16 pid)
+  toByteString (PubACK pid) = BL.singleton 0x40 `BL.append` withLength (encodeWord16 pid)
 
 parsePubACK :: A.Parser MQTTPkt
 parsePubACK = do
@@ -321,7 +321,7 @@ parsePubACK = do
 newtype PubREC = PubREC Word16 deriving(Eq, Show)
 
 instance ByteMe PubREC where
-  toByteString (PubREC pid) = BL.singleton 0x50 <> withLength (encodeWord16 pid)
+  toByteString (PubREC pid) = BL.singleton 0x50 `BL.append` withLength (encodeWord16 pid)
 
 parsePubREC :: A.Parser MQTTPkt
 parsePubREC = do
@@ -332,7 +332,7 @@ parsePubREC = do
 newtype PubREL = PubREL Word16 deriving(Eq, Show)
 
 instance ByteMe PubREL where
-  toByteString (PubREL pid) = BL.singleton 0x62 <> withLength (encodeWord16 pid)
+  toByteString (PubREL pid) = BL.singleton 0x62 `BL.append` withLength (encodeWord16 pid)
 
 parsePubREL :: A.Parser MQTTPkt
 parsePubREL = do
@@ -343,7 +343,7 @@ parsePubREL = do
 newtype PubCOMP = PubCOMP Word16 deriving(Eq, Show)
 
 instance ByteMe PubCOMP where
-  toByteString (PubCOMP pid) = BL.singleton 0x70 <> withLength (encodeWord16 pid)
+  toByteString (PubCOMP pid) = BL.singleton 0x70 `BL.append` withLength (encodeWord16 pid)
 
 parsePubCOMP :: A.Parser MQTTPkt
 parsePubCOMP = do
@@ -368,7 +368,7 @@ data SubscribeResponse = SubscribeResponse Word16 [Maybe QoS] deriving (Eq, Show
 
 instance ByteMe SubscribeResponse where
   toByteString (SubscribeResponse pid sres) =
-    BL.singleton 0x90 <> withLength (encodeWord16 pid <> BL.pack (b <$> sres))
+    BL.singleton 0x90 `BL.append` withLength (encodeWord16 pid `BL.append` BL.pack (b <$> sres))
 
     where
       b Nothing  = 0x80
@@ -391,7 +391,7 @@ data UnsubscribeRequest = UnsubscribeRequest Word16 [BL.ByteString]
 instance ByteMe UnsubscribeRequest where
   toByteString (UnsubscribeRequest pid sreq) =
     BL.singleton 0xa2
-    <> withLength (encodeWord16 pid <> mconcat (toByteString <$> sreq))
+    `BL.append` withLength (encodeWord16 pid `BL.append` mconcat (toByteString <$> sreq))
 
 parseUnsubscribe :: A.Parser MQTTPkt
 parseUnsubscribe = do
@@ -408,7 +408,7 @@ parseUnsubscribe = do
 newtype UnsubscribeResponse = UnsubscribeResponse Word16 deriving(Eq, Show)
 
 instance ByteMe UnsubscribeResponse where
-  toByteString (UnsubscribeResponse pid) = BL.singleton 0xb0 <> withLength (encodeWord16 pid)
+  toByteString (UnsubscribeResponse pid) = BL.singleton 0xb0 `BL.append` withLength (encodeWord16 pid)
 
 parseUnsubACK :: A.Parser MQTTPkt
 parseUnsubACK = do

@@ -36,12 +36,13 @@ import           Control.Concurrent.STM     (STM, TChan, TVar, atomically,
 import qualified Control.Exception          as E
 import           Control.Monad              (forever, void, when)
 import           Control.Monad.IO.Class     (liftIO)
+import           Control.Monad.Trans.Class  (lift)
 import qualified Data.ByteString.Char8      as BCS
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.Conduit               (runConduit, yield, (.|))
 import           Data.Conduit.Attoparsec    (conduitParser, sinkParser)
-import qualified Data.Conduit.Combinators   as C
+import qualified Data.Conduit.List   as C
 import           Data.Conduit.Network       (AppData, appSink, appSource,
                                              clientSettings, runTCPClient)
 import           Data.Conduit.Network.TLS   (runTLSClient, tlsClientConfig)
@@ -112,7 +113,7 @@ connectURI cfg uri = do
   let cf = case uriScheme uri of
              "mqtt:"  -> runClient
              "mqtts:" -> runClientTLS
-             us       -> fail $ "invalid URI scheme: " <> us
+             us       -> fail $ "invalid URI scheme: " ++ us
 
       (Just a) = uriAuthority uri
       (u,p) = up (uriUserInfo a)
@@ -204,8 +205,9 @@ runClientAppData mkconn MQTTConfig{..} = do
         .| C.mapM_ (\(_,x) -> liftIO (dispatch c pch x))
 
       where
+        repeatM m = forever $ lift m >>= yield
         processOut = runConduit $
-          C.repeatM (liftIO (atomically $ readTChan _ch))
+          repeatM (liftIO (atomically $ readTChan _ch))
           .| C.map (BL.toStrict . toByteString)
           .| appSink ad
 
